@@ -1,0 +1,14 @@
+{
+  "analyzers": {
+    "core": {
+      "enabled": true,
+      "rules": {
+        "no-hardcoded-env-urls": {
+          // Private-link DNS zone names and platform FQDNs (KMS, Entra) are
+          // intentionally literal — this landing zone targets Azure public cloud.
+          "level": "info"
+        }
+      }
+    }
+  }
+}
