@@ -118,7 +118,7 @@ param enableFlowLogs bool = false
 param networkWatcherName string = ''
 
 param networkWatcherResourceGroupName string = 'NetworkWatcherRG'
-param flowLogRetentionDays int = 30
+param flowLogRetentionDays int = 90
 
 // Patching
 @description('Update Manager window start, UTC ("yyyy-MM-dd HH:mm").')

@@ -18,6 +18,23 @@ variable "storage_allowed_ip_rules" {
   default     = []
 }
 
+variable "storage_replication_type" {
+  description = "Replication for the flow log account. ZRS keeps the evidence available through a zone outage."
+  type        = string
+  default     = "ZRS"
+
+  validation {
+    condition     = contains(["ZRS", "GRS", "GZRS", "RAGRS", "LRS"], var.storage_replication_type)
+    error_message = "storage_replication_type must be one of ZRS, GRS, GZRS, RAGRS, LRS."
+  }
+}
+
+variable "sas_expiration_period" {
+  description = "Maximum lifetime of a SAS token issued against the flow log account, as DD.HH:MM:SS."
+  type        = string
+  default     = "07.00:00:00"
+}
+
 variable "virtual_network_ids" {
   description = "Map of short name => virtual network resource ID to enable flow logs on."
   type        = map(string)
@@ -35,9 +52,18 @@ variable "network_watcher_resource_group_name" {
 }
 
 variable "retention_days" {
-  description = "Days to retain raw flow log blobs."
+  description = <<-EOT
+    Days to retain raw flow log blobs. 90 is the floor most compliance baselines
+    expect for network logs (and what Checkov's CKV_AZURE_12 enforces); lower it
+    only in non-prod, where cost matters more than evidence.
+  EOT
   type        = number
-  default     = 30
+  default     = 90
+
+  validation {
+    condition     = var.retention_days >= 1 && var.retention_days <= 365
+    error_message = "retention_days must be between 1 and 365."
+  }
 }
 
 variable "traffic_analytics_enabled" {

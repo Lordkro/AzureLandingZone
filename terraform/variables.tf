@@ -239,9 +239,9 @@ variable "network_watcher_resource_group_name" {
 }
 
 variable "flow_log_retention_days" {
-  description = "Days to retain raw flow log blobs."
+  description = "Days to retain raw flow log blobs. 90 is the floor most compliance baselines expect for network logs."
   type        = number
-  default     = 30
+  default     = 90
 }
 
 # ---------------------------------------------------------------------------

@@ -38,7 +38,7 @@ param vpnClientAddressSpace = ['172.16.0.0/24']
 // --- Flow logs ---------------------------------------------------------------
 // Needs a Network Watcher in the region; adds storage + ingestion cost.
 param enableFlowLogs = false
-param flowLogRetentionDays = 30
+param flowLogRetentionDays = 90
 
 // --- Management & security ---------------------------------------------------
 param logRetentionDays = 90

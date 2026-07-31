@@ -19,7 +19,7 @@ param location string
 param virtualNetworks array
 
 param storageAccountId string
-param retentionDays int = 30
+param retentionDays int = 90
 
 param trafficAnalyticsEnabled bool = true
 

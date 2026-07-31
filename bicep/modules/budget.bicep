@@ -38,34 +38,30 @@ param contactEmails array = []
 param actionGroupIds array = []
 
 // Forecast alerts are the useful ones — they fire before the money is gone.
-var actualNotifications = reduce(
-  map(actualThresholds, threshold => {
-    'actual-${threshold}': {
-      enabled: true
-      operator: 'GreaterThanOrEqualTo'
-      threshold: threshold
-      thresholdType: 'Actual'
-      contactEmails: contactEmails
-      contactGroups: actionGroupIds
-    }
-  }),
-  {},
-  (merged, next) => union(merged, next)
+var actualNotifications = toObject(
+  actualThresholds,
+  threshold => 'actual-${threshold}',
+  threshold => {
+    enabled: true
+    operator: 'GreaterThanOrEqualTo'
+    threshold: threshold
+    thresholdType: 'Actual'
+    contactEmails: contactEmails
+    contactGroups: actionGroupIds
+  }
 )
 
-var forecastNotifications = reduce(
-  map(forecastThresholds, threshold => {
-    'forecast-${threshold}': {
-      enabled: true
-      operator: 'GreaterThanOrEqualTo'
-      threshold: threshold
-      thresholdType: 'Forecasted'
-      contactEmails: contactEmails
-      contactGroups: actionGroupIds
-    }
-  }),
-  {},
-  (merged, next) => union(merged, next)
+var forecastNotifications = toObject(
+  forecastThresholds,
+  threshold => 'forecast-${threshold}',
+  threshold => {
+    enabled: true
+    operator: 'GreaterThanOrEqualTo'
+    threshold: threshold
+    thresholdType: 'Forecasted'
+    contactEmails: contactEmails
+    contactGroups: actionGroupIds
+  }
 )
 
 resource budget 'Microsoft.Consumption/budgets@2023-05-01' = {

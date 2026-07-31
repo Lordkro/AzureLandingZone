@@ -52,7 +52,7 @@ vpn_client_address_space = ["172.16.0.0/24"]
 # --- Flow logs ---------------------------------------------------------------
 # Needs a Network Watcher in the region; adds storage + ingestion cost.
 # enable_flow_logs        = true
-# flow_log_retention_days = 30
+# flow_log_retention_days = 90
 
 # --- Management & security ---------------------------------------------------
 log_retention_days     = 90
