@@ -71,6 +71,13 @@ resource appGatewayNsg 'Microsoft.Network/networkSecurityGroups@2024-05-01' = {
           destinationAddressPrefix: '*'
         }
       }
+      // TLS only from the internet. The gateway's default HTTP listener is
+      // therefore not reachable from outside — deliberately, it is a placeholder
+      // (see appGateway.bicep). If you add an HTTP listener that redirects to
+      // HTTPS, add a matching rule for port 80 at priority 111. It is written out
+      // rather than made a parameter on purpose: a conditional rule reads as
+      // "port 80 open" to every static scanner, which costs the guarantee that
+      // this subnet is TLS-only by default.
       {
         name: 'AllowHttpsInbound'
         properties: {
@@ -79,10 +86,7 @@ resource appGatewayNsg 'Microsoft.Network/networkSecurityGroups@2024-05-01' = {
           access: 'Allow'
           protocol: 'Tcp'
           sourcePortRange: '*'
-          destinationPortRanges: [
-            '80'
-            '443'
-          ]
+          destinationPortRange: '443'
           sourceAddressPrefix: 'Internet'
           destinationAddressPrefix: '*'
         }
@@ -97,6 +101,46 @@ resource appGatewayNsg 'Microsoft.Network/networkSecurityGroups@2024-05-01' = {
           sourcePortRange: '*'
           destinationPortRange: '*'
           sourceAddressPrefix: 'AzureLoadBalancer'
+          destinationAddressPrefix: '*'
+        }
+      }
+    ]
+  }
+}
+
+// Private endpoints honour NSG rules only because the subnet sets
+// privateEndpointNetworkPolicies: 'Enabled' below. Without that flag this NSG
+// would be silently ignored.
+resource privateEndpointsNsg 'Microsoft.Network/networkSecurityGroups@2024-05-01' = {
+  name: 'nsg-private-endpoints'
+  location: location
+  tags: tags
+  properties: {
+    securityRules: [
+      // Only the spoke and on-premises (via the hub) should reach a private endpoint.
+      {
+        name: 'AllowVnetInbound'
+        properties: {
+          priority: 200
+          direction: 'Inbound'
+          access: 'Allow'
+          protocol: '*'
+          sourcePortRange: '*'
+          destinationPortRange: '*'
+          sourceAddressPrefix: 'VirtualNetwork'
+          destinationAddressPrefix: 'VirtualNetwork'
+        }
+      }
+      {
+        name: 'DenyAllInbound'
+        properties: {
+          priority: 4096
+          direction: 'Inbound'
+          access: 'Deny'
+          protocol: '*'
+          sourcePortRange: '*'
+          destinationPortRange: '*'
+          sourceAddressPrefix: '*'
           destinationAddressPrefix: '*'
         }
       }
@@ -164,6 +208,9 @@ resource vnet 'Microsoft.Network/virtualNetworks@2024-05-01' = {
         properties: {
           addressPrefix: privateEndpointsPrefix
           privateEndpointNetworkPolicies: 'Enabled'
+          networkSecurityGroup: {
+            id: privateEndpointsNsg.id
+          }
           routeTable: {
             id: routeTable.id
           }

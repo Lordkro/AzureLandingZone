@@ -1,4 +1,16 @@
 resource "azurerm_storage_account" "this" {
+  # Queue logging: this account exists for blob workload data and the platform
+  # creates no queues. Setting queue_properties would also force the provider onto
+  # the storage data plane on every plan, which fails for a deployment identity
+  # that holds control-plane Owner but no data-plane role — the exact shape of the
+  # CI identity in docs/deployment.md.
+  #checkov:skip=CKV_AZURE_33:No queue service is used; enabling queue_properties would require data-plane access the deployment identity does not have.
+  # Customer-managed keys are a deliberate follow-up, not an oversight: they move
+  # the durability of this account onto a key whose loss is unrecoverable, and the
+  # platform Key Vault is created in the same stack behind a private endpoint. See
+  # docs/governance.md for the intended shape (key + storage identity + Key Vault
+  # Crypto Service Encryption User + azurerm_storage_account_customer_managed_key).
+  #checkov:skip=CKV2_AZURE_1:Platform-managed keys are the deliberate default; CMK is documented as an opt-in follow-up in docs/governance.md rather than forced on every consumer.
   name                = var.name
   resource_group_name = var.resource_group_name
   location            = var.location

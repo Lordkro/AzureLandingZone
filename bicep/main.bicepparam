@@ -44,6 +44,7 @@ param flowLogRetentionDays = 90
 param logRetentionDays = 90
 param logDailyQuotaGb = -1 // cap this in non-prod, e.g. 5
 param securityContactEmail = 'security@contoso.com'
+param securityContactPhone = '+441234567890' // Defender high-severity escalation
 param platformAlertEmails = ['platform-oncall@contoso.com']
 // param platformAlertWebhooks = ['https://contoso.webhook.office.com/...']
 param enableResourceLocks = true

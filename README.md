@@ -7,20 +7,20 @@ Production-ready Azure Landing Zone following the [Microsoft Cloud Adoption Fram
 | Area | Components |
 |---|---|
 | **Organisation** | CAF management group hierarchy — Platform (Identity/Management/Connectivity), Landing Zones (Corp/Online), Sandbox, Decommissioned — plus subscription placement *(opt-in)* |
-| **Networking** | Hub-spoke VNets with peering, forced tunnelling (UDR 0.0.0.0/0 → firewall), NSGs, optional DDoS Network Protection |
-| **Security edge** | Azure Firewall (Standard/Premium, DNS proxy, threat intel deny, baseline rules), Azure Bastion (Standard, native client), WAF_v2 Application Gateway (OWASP 3.2, Prevention) |
+| **Networking** | Hub-spoke VNets with peering, forced tunnelling (UDR 0.0.0.0/0 → firewall), NSGs on every subnet (including Bastion's documented rule set and the private endpoint subnet), optional DDoS Network Protection |
+| **Security edge** | Azure Firewall (Standard/Premium, DNS proxy, threat intel deny, baseline rules), Azure Bastion (Standard, native client), WAF_v2 Application Gateway (OWASP 3.2, Prevention, TLS 1.2 floor, TLS-only from the internet) |
 | **Hybrid connectivity** | VPN Gateway (zone-redundant `VpnGw1AZ`), optional P2S with Entra ID auth, optional S2S IPsec connections |
 | **DNS** | Private DNS zones for Key Vault, Storage, SQL, Web Apps, ACR and the full Azure Monitor private-link set + hub/spoke links |
 | **Management** | Log Analytics workspace (with ingestion cap), AMA data collection rule, diagnostic settings on every resource, **subscription activity log → workspace** |
 | **Observability** | Platform action group, Service Health / Resource Health / role-assignment alerts, firewall health + SNAT and App Gateway backend metric alerts |
 | **Network visibility** | VNet flow logs + Traffic Analytics on hub and spoke *(opt-in)* |
-| **Security posture** | Microsoft Defender for Cloud (7 plans), security contact, workspace routing |
+| **Security posture** | Microsoft Defender for Cloud (7 plans), security contact with escalation phone, workspace routing |
 | **Governance** | Azure Policy baseline — allowed locations, required/inherited tags, storage HTTPS + public-access, Key Vault purge protection + firewall, deny public IPs on NICs, blocked resource types, AMA install and DCR association with remediation identities |
 | **Access control** | Five custom platform roles (Platform Owner, NetOps, SecOps, Subscription Owner, Application Owner) + RBAC assignments |
 | **Cost** | Subscription budget with actual and forecast alerts *(opt-in)* |
 | **Resilience** | CanNotDelete locks on the hub, management and security resource groups |
 | **Patching** | Azure Update Manager maintenance window + dynamic scope (tag-driven VM enrolment) |
-| **Data services** | Key Vault (RBAC, purge protection, private endpoint), Storage (ZRS, OAuth-only, versioning, private endpoint) |
+| **Data services** | Key Vault (RBAC, purge protection, private endpoint), Storage (GZRS, OAuth-only, versioning, private endpoint) |
 
 ## Repository layout
 
@@ -84,7 +84,7 @@ These are off by default because they need broader permissions, extra prerequisi
 
 ## CI/CD
 
-Both workflows authenticate with **OIDC federated credentials** (no stored secrets), lint and security-scan (`tflint` / Bicep linter, Checkov → GitHub Security tab), post the plan/what-if as a PR comment, and gate `apply`/`deploy` behind the `production` GitHub environment so a human approves every change to `main`. A nightly scheduled run detects configuration drift. Required repository secrets are listed in [docs/deployment.md](docs/deployment.md#github-configuration).
+Both workflows authenticate with **OIDC federated credentials** (no stored secrets), lint and security-scan (`tflint` / Bicep linter, Checkov → GitHub Security tab — the repo scans clean on both frameworks; see [governance.md](docs/governance.md#static-analysis-checkov) for the handful of documented suppressions), post the plan/what-if as a PR comment, and gate `apply`/`deploy` behind the `production` GitHub environment so a human approves every change to `main`. A nightly scheduled run detects configuration drift. Required repository secrets are listed in [docs/deployment.md](docs/deployment.md#github-configuration).
 
 Management group changes run from a **separate, manual workflow** — they are tenant scoped and need a broader grant than the landing zone pipeline.
 

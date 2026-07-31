@@ -75,6 +75,9 @@ param logDailyQuotaGb int = -1
 
 param securityContactEmail string = 'security@example.com'
 
+@description('Phone number Defender uses for high-severity escalation, E.164 format. Replace the placeholder with the SOC number.')
+param securityContactPhone string = '+10000000000'
+
 @description('Additional email addresses added to the platform action group.')
 param platformAlertEmails array = []
 
@@ -402,6 +405,7 @@ module defender 'modules/defender.bicep' = {
   params: {
     plans: defenderPlans
     securityContactEmail: securityContactEmail
+    securityContactPhone: securityContactPhone
     logAnalyticsWorkspaceId: logAnalytics.outputs.workspaceId
   }
 }

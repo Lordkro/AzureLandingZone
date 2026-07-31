@@ -58,6 +58,7 @@ vpn_client_address_space = ["172.16.0.0/24"]
 log_retention_days     = 90
 log_daily_quota_gb     = -1 # cap this in non-prod, e.g. 5
 security_contact_email = "security@contoso.com"
+security_contact_phone = "+441234567890" # Defender high-severity escalation
 platform_alert_emails  = ["platform-oncall@contoso.com"]
 # platform_alert_webhooks = ["https://contoso.webhook.office.com/..."]
 enable_resource_locks = true

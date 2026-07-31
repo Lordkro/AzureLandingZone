@@ -76,6 +76,26 @@ The `nic-no-public-ip` policy assignment (Deny) exists to protect this invariant
 ### Zone redundancy
 Firewall, VPN Gateway, Bastion and Application Gateway public IPs are pinned to zones 1–3. Storage defaults to ZRS. Confirm the target region supports availability zones (not all do); set `zones = []` / `zones: []` for regions without them.
 
+### The Application Gateway ships TLS-only, with an unreachable placeholder listener
+
+Two things are true of the shipped default and both are deliberate:
+
+- The gateway has an **HTTP listener on port 80**. Application Gateway will not deploy with zero listeners, and an HTTPS listener needs a certificate the module cannot invent. It sits inside `ignore_changes`, so a workload can replace it without fighting Terraform.
+- The gateway subnet NSG allows **443 from the internet only**. So that placeholder listener is not reachable from outside — which is the point. A public WAF serving plaintext HTTP is not a default worth shipping.
+
+Net effect: `curl http://<gateway-ip>` times out on a fresh deploy. That is expected. To serve traffic:
+
+1. Add an HTTPS listener with a certificate from Key Vault (via a user-assigned identity).
+2. If you want the usual HTTP→HTTPS redirect, add the port 80 NSG rule — it is written out as a comment in `modules/spoke-network/main.tf` (Terraform) and `spokeNetwork.bicep`.
+
+The `ssl_policy` is pinned to `AppGwSslPolicy20220101S`: TLS 1.2 floor, strong ciphers only. That applies to every listener you add, so the TLS floor is set once at the gateway rather than per-listener.
+
+The port 80 rule is written out rather than exposed as a variable on purpose. A conditional rule reads as "port 80 open" to every static scanner, which costs the guarantee that the subnet is TLS-only by default.
+
+### Bastion runs behind its documented NSG
+
+`AzureBastionSubnet` carries the full rule set Microsoft requires — control plane (`GatewayManager`, `AzureLoadBalancer` on 443), data plane (`BastionHostCommunication` on 8080/5701), outbound SSH/RDP to the VNet, and 80/443 to the internet for session information and CRL checks. Bastion breaks if any of it is missing, so do not tidy these rules. The private endpoint subnet has its own NSG (VNet-only inbound, deny the rest), which only takes effect because that subnet sets `private_endpoint_network_policies = "Enabled"`.
+
 ### Identity-first data plane
 - Key Vault: RBAC authorization (no access policies), public network access disabled.
 - Storage: shared-key auth **disabled**, OAuth default, public access disabled. Data-plane access is via Entra ID roles (e.g. `Storage Blob Data Contributor`) over the private endpoint.

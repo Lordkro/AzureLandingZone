@@ -6,8 +6,12 @@ resource "azurerm_security_center_subscription_pricing" "this" {
 }
 
 resource "azurerm_security_center_contact" "this" {
-  name                = "default"
-  email               = var.security_contact_email
+  name  = "default"
+  email = var.security_contact_email
+  # Defender uses the phone number for high-severity escalation when email is not
+  # acknowledged. Azure requires a value here, so the default is an obvious
+  # placeholder — replace it with the SOC's number.
+  phone               = var.security_contact_phone
   alert_notifications = true
   alerts_to_admins    = true
 }

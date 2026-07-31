@@ -245,6 +245,7 @@ module "defender" {
   subscription_id            = data.azurerm_client_config.current.subscription_id
   plans                      = var.defender_plans
   security_contact_email     = var.security_contact_email
+  security_contact_phone     = var.security_contact_phone
   log_analytics_workspace_id = module.log_analytics.workspace_id
 }
 

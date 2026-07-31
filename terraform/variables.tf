@@ -266,6 +266,16 @@ variable "security_contact_email" {
   default     = "security@example.com"
 }
 
+variable "security_contact_phone" {
+  description = <<-EOT
+    Phone number Defender for Cloud uses for high-severity escalation, E.164
+    format. Azure requires a value; the default is an obvious placeholder —
+    replace it with the SOC's number.
+  EOT
+  type        = string
+  default     = "+10000000000"
+}
+
 variable "platform_alert_emails" {
   description = "Additional email addresses added to the platform action group (service health, resource health, firewall and gateway alerts)."
   type        = list(string)

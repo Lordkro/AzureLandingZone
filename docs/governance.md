@@ -170,6 +170,42 @@ Prerequisites and caveats:
 - Budgets do not stop spend. They are the tripwire.
 - The workspace ingestion cap is the other cost control worth setting deliberately.
 
+## Static analysis (Checkov)
+
+Both pipelines run Checkov and upload SARIF to the Security tab. The repository scans clean — **0 failures** on both frameworks — with a small number of suppressions, each carrying its reason inline at the resource it applies to. There is no global `skip-check` list, deliberately: a global skip would also hide the same control where it genuinely applies.
+
+Suppressions fall into three groups:
+
+**1. Service constraints.** The Network Watcher flow log writer is an Azure first-party service outside the VNet. It requires public network access enabled (the account is still default-deny with a trusted-services bypass) and account-key auth, and gains nothing from a private endpoint. `CKV_AZURE_59`, `CKV2_AZURE_40`, `CKV2_AZURE_33`.
+
+**2. Scanner limitations.** Checkov cannot resolve some values it needs:
+
+| Check | Why it cannot see the answer |
+|---|---|
+| `CKV_AZURE_12` | Flow log retention is 90, but the value passes through the root module's own variable |
+| `CKV_AZURE_206` (Bicep) | `replicationType` defaults to `Standard_GZRS`; the Bicep parser does not resolve parameter defaults |
+| `CKV_AZURE_216` | Inspects `threat_intel_mode` on `azurerm_firewall`, which only exists on classic firewalls. This is policy-based, where it lives on the policy as `threat_intelligence_mode = "Deny"` — and the two are mutually exclusive |
+| `CKV_AZURE_21` / `CKV_AZURE_22` | Look for the legacy 2017 `alertNotifications: 'On'` string keys. This uses the current API, where the equivalent is `notificationsSources` + `notificationsByRole` |
+| `CKV_AZURE_87` | Wants a literal pricing resource named `KeyVaults`; the plan is enabled through a loop over `plans` |
+
+Verify these by hand rather than trusting the scan: `az security pricing show -n KeyVaults`, `az network firewall policy show`.
+
+**3. Deliberate design positions.** Two, both documented above:
+
+- `CKV_AZURE_217` — the Application Gateway's HTTP listener is a placeholder that cannot be HTTPS without a certificate. Mitigated by the NSG being TLS-only and `ssl_policy` setting the floor for real listeners.
+- `CKV_AZURE_33` and `CKV2_AZURE_1` on the platform storage account — no queue service is used, and platform-managed keys are the default.
+
+### Customer-managed keys: the documented follow-up
+
+CMK on the platform storage account is **not** enabled, and that is a decision rather than an oversight. It moves the account's durability onto a key whose loss is unrecoverable, and it needs key rotation and break-glass procedures that belong to the adopting organisation, not to a reference template. The shape when you do want it:
+
+1. Create a key in the platform Key Vault (purge protection and soft delete are already on — both are prerequisites).
+2. Give the storage account a system-assigned identity.
+3. Grant that identity **Key Vault Crypto Service Encryption User** on the vault.
+4. Attach with `azurerm_storage_account_customer_managed_key` (a separate resource, which avoids the ordering deadlock of the inline `customer_managed_key` block), or `encryption.keyvaultproperties` in Bicep.
+
+The vault's `bypass = "AzureServices"` already lets the storage service reach it over the backbone despite the private endpoint.
+
 ## Resource locks
 
 `enable_resource_locks` / `enableResourceLocks` (on by default) puts a `CanNotDelete` lock on `rg-hub`, `rg-mgmt` and `rg-sec`. A deleted hub takes every spoke's egress path with it. `rg-spoke` is deliberately **not** locked so workload teams can tear down and rebuild their own resources.
