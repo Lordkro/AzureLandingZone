@@ -45,6 +45,12 @@ resource "azurerm_web_application_firewall_policy" "this" {
 }
 
 resource "azurerm_application_gateway" "this" {
+  # The default listener is an HTTP placeholder: an HTTPS listener needs a
+  # certificate, which this module cannot invent, and Application Gateway will
+  # not deploy with zero listeners. It sits inside the ignore_changes block below
+  # so a workload can replace it with a real HTTPS listener without fighting
+  # Terraform. See docs/architecture.md for the upgrade path.
+  #checkov:skip=CKV_AZURE_217:The HTTP listener is a placeholder that workloads replace; an HTTPS listener requires a certificate this module has no way to supply. TLS floor for real listeners is enforced by ssl_policy above.
   name                = var.name
   resource_group_name = var.resource_group_name
   location            = var.location
@@ -55,6 +61,14 @@ resource "azurerm_application_gateway" "this" {
   sku {
     name = "WAF_v2"
     tier = "WAF_v2"
+  }
+
+  # TLS 1.2 floor with only the strong cipher suites. AppGwSslPolicy20220101S is
+  # the "strict" predefined policy — it drops TLS 1.0/1.1 and the CBC and
+  # 3DES suites that the default policy still permits.
+  ssl_policy {
+    policy_type = "Predefined"
+    policy_name = var.ssl_policy_name
   }
 
   autoscale_configuration {

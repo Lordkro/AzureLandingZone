@@ -11,11 +11,22 @@ on:
     paths:
       - "terraform/**"
       - ".github/workflows/terraform.yml"
+  schedule:
+    # Nightly drift detection — surfaces out-of-band portal changes.
+    - cron: "0 3 * * *"
+  workflow_dispatch:
 
 permissions:
   id-token: write # OIDC federated login to Azure
   contents: read
   pull-requests: write
+  security-events: write # upload Checkov SARIF
+
+# Two applies against one state file corrupt it. The azurerm backend takes a
+# blob lease, but serialising here gives a clean queue instead of a hard failure.
+concurrency:
+  group: terraform-${{ github.ref }}
+  cancel-in-progress: false
 
 env:
   ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
@@ -26,9 +37,87 @@ env:
   WORKING_DIR: terraform
 
 jobs:
+  # Everything below the lint job needs a real Azure connection. Without the
+  # OIDC secrets, `terraform init` fails deep inside the provider with an opaque
+  # "Error building ARM Config" — so check up front and skip cleanly instead,
+  # leaving lint/scan as the signal until the bootstrap in docs/deployment.md is
+  # done.
+  preflight:
+    name: Preflight
+    runs-on: ubuntu-latest
+    outputs:
+      azure_configured: ${{ steps.check.outputs.azure_configured }}
+    steps:
+      - name: Check for Azure OIDC secrets
+        id: check
+        run: |
+          missing=""
+          [ -n "${{ secrets.AZURE_CLIENT_ID }}" ]        || missing="$missing AZURE_CLIENT_ID"
+          [ -n "${{ secrets.AZURE_TENANT_ID }}" ]        || missing="$missing AZURE_TENANT_ID"
+          [ -n "${{ secrets.AZURE_SUBSCRIPTION_ID }}" ]  || missing="$missing AZURE_SUBSCRIPTION_ID"
+          [ -n "${{ secrets.TFSTATE_RESOURCE_GROUP }}" ] || missing="$missing TFSTATE_RESOURCE_GROUP"
+          [ -n "${{ secrets.TFSTATE_STORAGE_ACCOUNT }}" ] || missing="$missing TFSTATE_STORAGE_ACCOUNT"
+          if [ -n "$missing" ]; then
+            echo "azure_configured=false" >> "$GITHUB_OUTPUT"
+            echo "### Azure validation skipped" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "Missing repository secrets:$missing" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "Complete the bootstrap in [docs/deployment.md](docs/deployment.md#github-configuration) to enable plan and apply." >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning::Azure OIDC secrets not configured — skipping validate/plan/apply. Missing:$missing"
+          else
+            echo "azure_configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  lint:
+    name: Lint & Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.9"
+
+      - name: Terraform fmt
+        working-directory: ${{ env.WORKING_DIR }}
+        run: terraform fmt -check -recursive
+
+      - uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: latest
+
+      - name: TFLint
+        working-directory: ${{ env.WORKING_DIR }}
+        run: |
+          tflint --init
+          tflint --recursive --minimum-failure-severity=error
+
+      # Static security scan. Findings land in the Security tab rather than
+      # blocking the pipeline, so a new rule release does not stop deployments.
+      - name: Checkov
+        id: checkov
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: terraform
+          framework: terraform
+          quiet: true
+          soft_fail: true
+          output_format: cli,sarif
+          output_file_path: console,checkov.sarif
+
+      - name: Upload Checkov SARIF
+        if: always() && hashFiles('checkov.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: checkov.sarif
+          category: checkov-terraform
+
   validate:
     name: Validate & Plan
     runs-on: ubuntu-latest
+    needs: [preflight, lint]
+    if: needs.preflight.outputs.azure_configured == 'true'
     defaults:
       run:
         working-directory: ${{ env.WORKING_DIR }}
@@ -38,9 +127,6 @@ jobs:
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: "~1.9"
-
-      - name: Terraform fmt
-        run: terraform fmt -check -recursive
 
       - name: Terraform init
         run: |
@@ -57,35 +143,74 @@ jobs:
 
       - name: Terraform plan
         id: plan
-        run: terraform plan -no-color -input=false -out=tfplan
+        run: terraform plan -no-color -input=false -out=tfplan -detailed-exitcode
         continue-on-error: true
 
+      # -detailed-exitcode: 0 = no changes, 1 = error, 2 = changes present.
+      - name: Interpret plan exit code
+        id: outcome
+        run: |
+          case "${{ steps.plan.outputs.exitcode }}" in
+            0) echo "status=no-changes" >> "$GITHUB_OUTPUT" ;;
+            2) echo "status=changes"    >> "$GITHUB_OUTPUT" ;;
+            *) echo "status=error"      >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - name: Render plan to text
+        if: steps.outcome.outputs.status != 'error'
+        run: terraform show -no-color tfplan > plan.txt
+
+      # The plan text is passed through the environment, never interpolated into
+      # the script body — plan output can contain backticks and ${} sequences
+      # that would otherwise break or inject into the JS.
       - name: Comment plan on PR
         if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
+        env:
+          PLAN_STATUS: ${{ steps.outcome.outputs.status }}
+          PLAN_PATH: ${{ env.WORKING_DIR }}/plan.txt
         with:
           script: |
-            const output = `#### Terraform Plan: \`${{ steps.plan.outcome }}\`
-            <details><summary>Show plan</summary>
-
-            \`\`\`
-            ${{ steps.plan.outputs.stdout }}
-            \`\`\`
-
-            </details>`;
-            github.rest.issues.createComment({
+            const fs = require('fs');
+            const status = process.env.PLAN_STATUS;
+            let plan = 'Plan failed — see the workflow log.';
+            if (fs.existsSync(process.env.PLAN_PATH)) {
+              plan = fs.readFileSync(process.env.PLAN_PATH, 'utf8').slice(0, 60000);
+            }
+            const body = [
+              `#### Terraform Plan: \`${status}\``,
+              '<details><summary>Show plan</summary>',
+              '',
+              '```terraform',
+              plan,
+              '```',
+              '',
+              '</details>',
+            ].join('\n');
+            await github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: output.substring(0, 65000)
+              body,
             });
 
       - name: Fail on plan error
-        if: steps.plan.outcome == 'failure'
-        run: exit 1
+        if: steps.outcome.outputs.status == 'error'
+        run: |
+          echo "::error::terraform plan failed"
+          exit 1
 
+      # Drift on a scheduled run means someone changed Azure outside this repo.
+      - name: Fail scheduled run on drift
+        if: github.event_name == 'schedule' && steps.outcome.outputs.status == 'changes'
+        run: |
+          echo "::error::Configuration drift detected — the deployed estate no longer matches main."
+          exit 1
+
+      # The plan file embeds resource attributes, so treat it as sensitive: short
+      # retention, and it never leaves the repository's own artifact storage.
       - name: Upload plan artifact
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' && steps.outcome.outputs.status == 'changes'
         uses: actions/upload-artifact@v4
         with:
           name: tfplan
@@ -94,8 +219,8 @@ jobs:
 
   apply:
     name: Apply
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: validate
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.preflight.outputs.azure_configured == 'true'
+    needs: [preflight, validate]
     runs-on: ubuntu-latest
     environment: production # requires manual approval when configured
     defaults:
@@ -119,10 +244,17 @@ jobs:
             -backend-config="use_azuread_auth=true"
 
       - name: Download plan artifact
+        id: download
+        continue-on-error: true
         uses: actions/download-artifact@v4
         with:
           name: tfplan
           path: ${{ env.WORKING_DIR }}
 
+      - name: Nothing to apply
+        if: steps.download.outcome != 'success'
+        run: echo "No plan artifact — the plan reported no changes. Skipping apply."
+
       - name: Terraform apply
+        if: steps.download.outcome == 'success'
         run: terraform apply -input=false tfplan

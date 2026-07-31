@@ -3,6 +3,14 @@ param name string
 param location string
 param subnetId string
 param scaleUnits int = 2
+
+@description('Availability zones for the public IP. Set to [] in regions without zones.')
+param zones array = [
+  '1'
+  '2'
+  '3'
+]
+
 param logAnalyticsWorkspaceId string
 param tags object = {}
 
@@ -13,6 +21,7 @@ resource publicIp 'Microsoft.Network/publicIPAddresses@2024-05-01' = {
   sku: {
     name: 'Standard'
   }
+  zones: zones
   properties: {
     publicIPAllocationMethod: 'Static'
   }

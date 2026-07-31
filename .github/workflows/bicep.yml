@@ -11,20 +11,109 @@ on:
     paths:
       - "bicep/**"
       - ".github/workflows/bicep.yml"
+  schedule:
+    # Nightly what-if — surfaces out-of-band portal changes.
+    - cron: "0 3 * * *"
+  workflow_dispatch:
 
 permissions:
   id-token: write # OIDC federated login to Azure
   contents: read
   pull-requests: write
+  security-events: write # upload Checkov SARIF
+
+# Serialise deployments: two concurrent subscription deployments touching the
+# same resource names race each other.
+concurrency:
+  group: bicep-${{ github.ref }}
+  cancel-in-progress: false
 
 env:
   LOCATION: westeurope
   DEPLOYMENT_NAME: alz-${{ github.run_number }}
 
 jobs:
-  validate:
-    name: Lint, Validate & What-If
+  # Everything below the lint job needs a real Azure connection. Without the OIDC
+  # secrets, azure/login fails with an opaque error — so check up front and skip
+  # cleanly instead, leaving lint/scan as the signal until the bootstrap in
+  # docs/deployment.md is done.
+  preflight:
+    name: Preflight
     runs-on: ubuntu-latest
+    outputs:
+      azure_configured: ${{ steps.check.outputs.azure_configured }}
+    steps:
+      - name: Check for Azure OIDC secrets
+        id: check
+        run: |
+          missing=""
+          [ -n "${{ secrets.AZURE_CLIENT_ID }}" ]       || missing="$missing AZURE_CLIENT_ID"
+          [ -n "${{ secrets.AZURE_TENANT_ID }}" ]       || missing="$missing AZURE_TENANT_ID"
+          [ -n "${{ secrets.AZURE_SUBSCRIPTION_ID }}" ] || missing="$missing AZURE_SUBSCRIPTION_ID"
+          if [ -n "$missing" ]; then
+            echo "azure_configured=false" >> "$GITHUB_OUTPUT"
+            echo "### Azure validation skipped" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "Missing repository secrets:$missing" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "Complete the bootstrap in [docs/deployment.md](docs/deployment.md#github-configuration) to enable what-if and deploy." >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning::Azure OIDC secrets not configured — skipping validate/what-if/deploy. Missing:$missing"
+          else
+            echo "azure_configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  lint:
+    name: Lint & Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Compile every template, not just main.bicep — managementGroups.bicep is
+      # a separate root and would otherwise never be checked.
+      - name: Bicep build (fail on warnings)
+        run: |
+          set -euo pipefail
+          status=0
+          for template in bicep/main.bicep bicep/managementGroups.bicep; do
+            echo "::group::$template"
+            if ! az bicep build --file "$template" --stdout > /dev/null 2> "diag.txt"; then
+              status=1
+            fi
+            # The linter writes Info/Warning/Error diagnostics to stderr and only
+            # exits non-zero on Error, so escalate warnings explicitly.
+            if grep -E " : (Warning|Error) " diag.txt; then
+              status=1
+            fi
+            cat diag.txt
+            echo "::endgroup::"
+          done
+          exit $status
+
+      - name: Validate parameter file
+        run: az bicep build-params --file bicep/main.bicepparam --stdout > /dev/null
+
+      - name: Checkov
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: bicep
+          framework: bicep
+          quiet: true
+          soft_fail: true
+          output_format: cli,sarif
+          output_file_path: console,checkov.sarif
+
+      - name: Upload Checkov SARIF
+        if: always() && hashFiles('checkov.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: checkov.sarif
+          category: checkov-bicep
+
+  validate:
+    name: Validate & What-If
+    runs-on: ubuntu-latest
+    needs: [preflight, lint]
+    if: needs.preflight.outputs.azure_configured == 'true'
     steps:
       - uses: actions/checkout@v4
 
@@ -34,9 +123,6 @@ jobs:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-
-      - name: Bicep lint
-        run: az bicep build --file bicep/main.bicep --stdout > /dev/null
 
       - name: Validate deployment
         run: |
@@ -54,35 +140,39 @@ jobs:
             --location "$LOCATION" \
             --template-file bicep/main.bicep \
             --parameters bicep/main.bicepparam \
-            --result-format FullResourcePayloads > whatif.txt
+            --result-format ResourceIdOnly > whatif.txt
           cat whatif.txt
 
+      # whatif.txt is read from disk, never interpolated into the script body —
+      # its contents can include backticks and ${} sequences.
       - name: Comment what-if on PR
         if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
-            const whatif = fs.readFileSync('whatif.txt', 'utf8');
-            const body = `#### Bicep What-If
-            <details><summary>Show changes</summary>
-
-            \`\`\`
-            ${whatif}
-            \`\`\`
-
-            </details>`;
-            github.rest.issues.createComment({
+            const whatif = fs.readFileSync('whatif.txt', 'utf8').slice(0, 60000);
+            const body = [
+              '#### Bicep What-If',
+              '<details><summary>Show changes</summary>',
+              '',
+              '```',
+              whatif,
+              '```',
+              '',
+              '</details>',
+            ].join('\n');
+            await github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: body.substring(0, 65000)
+              body,
             });
 
   deploy:
     name: Deploy
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: validate
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.preflight.outputs.azure_configured == 'true'
+    needs: [preflight, validate]
     runs-on: ubuntu-latest
     environment: production # requires manual approval when configured
     steps:

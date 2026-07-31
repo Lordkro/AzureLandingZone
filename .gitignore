@@ -3,15 +3,19 @@
 *.tfstate
 *.tfstate.*
 *.tfplan
+tfplan
 *.tfvars
 !*.tfvars.example
-.terraform.lock.hcl
+backend.hcl
 crash.log
 override.tf
 override.tf.json
+# NOTE: .terraform.lock.hcl is intentionally NOT ignored — commit it so every
+# run (local and CI) resolves identical provider versions and hashes.
 
 # Bicep
 *.azrm.json
+whatif.txt
 
 # IDE / OS
 .vscode/

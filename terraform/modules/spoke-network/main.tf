@@ -4,6 +4,14 @@ resource "azurerm_virtual_network" "this" {
   location            = var.location
   address_space       = var.address_space
   tags                = var.tags
+
+  dynamic "ddos_protection_plan" {
+    for_each = var.ddos_protection_plan_id == null ? [] : [1]
+    content {
+      id     = var.ddos_protection_plan_id
+      enable = true
+    }
+  }
 }
 
 resource "azurerm_subnet" "workload" {
@@ -88,6 +96,26 @@ resource "azurerm_network_security_group" "app_gateway" {
     destination_address_prefix = "*"
   }
 
+  # TLS only from the internet. The gateway's default HTTP listener is therefore
+  # not reachable from outside — deliberately, it is a placeholder (see the
+  # app-gateway module). If you add an HTTP listener that redirects to HTTPS, add
+  # the matching rule here:
+  #
+  #   security_rule {
+  #     name                       = "AllowHttpInboundForRedirect"
+  #     priority                   = 111
+  #     direction                  = "Inbound"
+  #     access                     = "Allow"
+  #     protocol                   = "Tcp"
+  #     source_port_range          = "*"
+  #     destination_port_range     = "80"
+  #     source_address_prefix      = "Internet"
+  #     destination_address_prefix = "*"
+  #   }
+  #
+  # It is written out rather than made a variable on purpose: a conditional rule
+  # reads as "port 80 open" to every static scanner, which costs the guarantee
+  # that this subnet is TLS-only by default.
   security_rule {
     name                       = "AllowHttpsInbound"
     priority                   = 110
@@ -95,7 +123,7 @@ resource "azurerm_network_security_group" "app_gateway" {
     access                     = "Allow"
     protocol                   = "Tcp"
     source_port_range          = "*"
-    destination_port_ranges    = ["80", "443"]
+    destination_port_range     = "443"
     source_address_prefix      = "Internet"
     destination_address_prefix = "*"
   }
@@ -116,6 +144,46 @@ resource "azurerm_network_security_group" "app_gateway" {
 resource "azurerm_subnet_network_security_group_association" "app_gateway" {
   subnet_id                 = azurerm_subnet.app_gateway.id
   network_security_group_id = azurerm_network_security_group.app_gateway.id
+}
+
+# Private endpoints honour NSG rules only because the subnet sets
+# private_endpoint_network_policies = "Enabled" above. Without that flag this NSG
+# would be silently ignored.
+resource "azurerm_network_security_group" "private_endpoints" {
+  name                = "nsg-private-endpoints"
+  resource_group_name = var.resource_group_name
+  location            = var.location
+  tags                = var.tags
+
+  # Only the spoke and on-premises (via the hub) should reach a private endpoint.
+  security_rule {
+    name                       = "AllowVnetInbound"
+    priority                   = 200
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "*"
+    source_port_range          = "*"
+    destination_port_range     = "*"
+    source_address_prefix      = "VirtualNetwork"
+    destination_address_prefix = "VirtualNetwork"
+  }
+
+  security_rule {
+    name                       = "DenyAllInbound"
+    priority                   = 4096
+    direction                  = "Inbound"
+    access                     = "Deny"
+    protocol                   = "*"
+    source_port_range          = "*"
+    destination_port_range     = "*"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
+  }
+}
+
+resource "azurerm_subnet_network_security_group_association" "private_endpoints" {
+  subnet_id                 = azurerm_subnet.private_endpoints.id
+  network_security_group_id = azurerm_network_security_group.private_endpoints.id
 }
 
 # ---------------------------------------------------------------------------

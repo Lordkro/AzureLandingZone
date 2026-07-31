@@ -30,6 +30,12 @@ variable "shared_services_prefix" {
   type = string
 }
 
+variable "ddos_protection_plan_id" {
+  description = "DDoS Network Protection plan to attach. Null leaves the VNet on the free Basic tier."
+  type        = string
+  default     = null
+}
+
 variable "log_analytics_workspace_id" {
   type = string
 }

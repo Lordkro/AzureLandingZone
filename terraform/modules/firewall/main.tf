@@ -119,6 +119,12 @@ resource "azurerm_firewall_policy_rule_collection_group" "platform" {
 }
 
 resource "azurerm_firewall" "this" {
+  # CKV_AZURE_216 inspects `threat_intel_mode` on this resource, which only exists
+  # on classic (rule-based) firewalls. This is a policy-based firewall, where the
+  # setting lives on azurerm_firewall_policy above as threat_intelligence_mode =
+  # "Deny" — and azurerm rejects both being set at once. The control is on; the
+  # check is looking at the wrong resource for this topology.
+  #checkov:skip=CKV_AZURE_216:Policy-based firewall — threat intel Deny is set on azurerm_firewall_policy.threat_intelligence_mode, and the two settings are mutually exclusive.
   name                = var.name
   resource_group_name = var.resource_group_name
   location            = var.location

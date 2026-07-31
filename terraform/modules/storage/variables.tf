@@ -16,8 +16,20 @@ variable "location" {
 }
 
 variable "replication_type" {
-  type    = string
-  default = "ZRS"
+  description = <<-EOT
+    Replication for the platform storage account. GZRS is the default: zone
+    redundancy in the primary region plus an asynchronous geo copy, which is what
+    most compliance baselines expect of platform data. GZRS is not offered in
+    every region — fall back to ZRS (zone only) or GRS (geo only) where it is
+    unavailable, and accept the narrower guarantee.
+  EOT
+  type        = string
+  default     = "GZRS"
+
+  validation {
+    condition     = contains(["GZRS", "RAGZRS", "GRS", "RAGRS", "ZRS", "LRS"], var.replication_type)
+    error_message = "replication_type must be one of GZRS, RAGZRS, GRS, RAGRS, ZRS, LRS."
+  }
 }
 
 variable "private_endpoint_subnet_id" {

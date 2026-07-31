@@ -9,6 +9,14 @@ param zones array = [
   '2'
   '3'
 ]
+@description('Predefined SSL policy. AppGwSslPolicy20220101S is the strict profile: TLS 1.2 floor, strong cipher suites only.')
+@allowed([
+  'AppGwSslPolicy20220101S'
+  'AppGwSslPolicy20220101'
+  'AppGwSslPolicy20170401S'
+])
+param sslPolicyName string = 'AppGwSslPolicy20220101S'
+
 param logAnalyticsWorkspaceId string
 param tags object = {}
 
@@ -61,6 +69,13 @@ resource appGateway 'Microsoft.Network/applicationGateways@2024-05-01' = {
     sku: {
       name: 'WAF_v2'
       tier: 'WAF_v2'
+    }
+    // TLS 1.2 floor with only the strong cipher suites. AppGwSslPolicy20220101S
+    // is the "strict" predefined policy — it drops TLS 1.0/1.1 and the CBC and
+    // 3DES suites the default policy still permits.
+    sslPolicy: {
+      policyType: 'Predefined'
+      policyName: sslPolicyName
     }
     autoscaleConfiguration: {
       minCapacity: autoscaleMin

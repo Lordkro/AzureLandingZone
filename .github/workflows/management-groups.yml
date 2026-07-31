@@ -1,0 +1,77 @@
+name: Management Groups
+
+# Manual only. This is a tenant-scoped deployment that reshapes the management
+# group hierarchy and moves subscriptions between groups — not something to run
+# automatically on every push to main. It also needs a deployment identity with
+# Owner or Management Group Contributor on the Tenant Root Group, which is a
+# broader grant than the landing zone pipeline requires.
+on:
+  workflow_dispatch:
+    inputs:
+      prefix:
+        description: "Management group name prefix (mg-<prefix>)"
+        required: true
+        default: "alz"
+      display_name:
+        description: "Display name of the intermediate root management group"
+        required: true
+        default: "Landing Zone"
+      what_if_only:
+        description: "Preview changes without deploying"
+        type: boolean
+        default: true
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: management-groups
+  cancel-in-progress: false
+
+env:
+  LOCATION: westeurope
+
+jobs:
+  deploy:
+    name: ${{ inputs.what_if_only && 'What-If' || 'Deploy' }}
+    runs-on: ubuntu-latest
+    # Even the preview reads tenant-wide structure; keep it behind the same gate.
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for Azure OIDC secrets
+        run: |
+          if [ -z "${{ secrets.AZURE_CLIENT_ID }}" ] || [ -z "${{ secrets.AZURE_TENANT_ID }}" ]; then
+            echo "::error::Azure OIDC secrets are not configured. Complete the bootstrap in docs/deployment.md first."
+            exit 1
+          fi
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Build template
+        run: az bicep build --file bicep/managementGroups.bicep --stdout > /dev/null
+
+      - name: What-if
+        if: inputs.what_if_only
+        run: |
+          az deployment tenant what-if \
+            --name "alz-management-groups-${{ github.run_number }}" \
+            --location "$LOCATION" \
+            --template-file bicep/managementGroups.bicep \
+            --parameters prefix="${{ inputs.prefix }}" displayName="${{ inputs.display_name }}"
+
+      - name: Deploy
+        if: ${{ !inputs.what_if_only }}
+        run: |
+          az deployment tenant create \
+            --name "alz-management-groups-${{ github.run_number }}" \
+            --location "$LOCATION" \
+            --template-file bicep/managementGroups.bicep \
+            --parameters prefix="${{ inputs.prefix }}" displayName="${{ inputs.display_name }}"
