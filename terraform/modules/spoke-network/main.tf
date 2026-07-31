@@ -4,6 +4,14 @@ resource "azurerm_virtual_network" "this" {
   location            = var.location
   address_space       = var.address_space
   tags                = var.tags
+
+  dynamic "ddos_protection_plan" {
+    for_each = var.ddos_protection_plan_id == null ? [] : [1]
+    content {
+      id     = var.ddos_protection_plan_id
+      enable = true
+    }
+  }
 }
 
 resource "azurerm_subnet" "workload" {

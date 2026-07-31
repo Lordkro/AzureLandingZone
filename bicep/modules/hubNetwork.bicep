@@ -6,6 +6,10 @@ param firewallSubnetPrefix string
 param gatewaySubnetPrefix string
 param bastionSubnetPrefix string
 param sharedServicesPrefix string
+
+@description('DDoS Network Protection plan to attach. Empty leaves the VNet on the free Basic tier.')
+param ddosProtectionPlanId string = ''
+
 param logAnalyticsWorkspaceId string
 param tags object = {}
 
@@ -40,6 +44,12 @@ resource vnet 'Microsoft.Network/virtualNetworks@2024-05-01' = {
     addressSpace: {
       addressPrefixes: addressSpace
     }
+    enableDdosProtection: !empty(ddosProtectionPlanId)
+    ddosProtectionPlan: empty(ddosProtectionPlanId)
+      ? null
+      : {
+          id: ddosProtectionPlanId
+        }
     subnets: [
       {
         name: 'AzureFirewallSubnet'

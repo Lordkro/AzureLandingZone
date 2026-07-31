@@ -18,6 +18,11 @@ terraform {
 }
 
 provider "azurerm" {
+  # azurerm v4 requires an explicit subscription. CI supplies it through
+  # ARM_SUBSCRIPTION_ID; setting the variable is only needed for local runs
+  # against a subscription other than the CLI default.
+  subscription_id = var.subscription_id
+
   features {
     key_vault {
       purge_soft_delete_on_destroy    = false

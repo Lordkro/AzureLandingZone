@@ -33,6 +33,11 @@ output "log_analytics_workspace_id" {
   value       = module.log_analytics.workspace_id
 }
 
+output "data_collection_rule_id" {
+  description = "Resource ID of the platform VM data collection rule."
+  value       = module.log_analytics.vm_data_collection_rule_id
+}
+
 output "key_vault_uri" {
   description = "URI of the platform Key Vault."
   value       = module.key_vault.vault_uri
@@ -51,4 +56,24 @@ output "app_gateway_public_ip" {
 output "private_dns_zone_ids" {
   description = "Map of private DNS zone name to resource ID."
   value       = module.private_dns.zone_ids
+}
+
+output "action_group_id" {
+  description = "Resource ID of the platform action group — reuse it for workload alerts."
+  value       = module.monitoring.action_group_id
+}
+
+output "management_group_ids" {
+  description = "Map of hierarchy key => management group resource ID. Null when enable_management_groups is false."
+  value       = one(module.management_groups[*].management_group_ids)
+}
+
+output "custom_role_names" {
+  description = "Map of role key => display name for the custom platform roles, for use in rbac_assignments. Null when enable_custom_roles is false."
+  value       = one(module.custom_roles[*].role_names)
+}
+
+output "ddos_protection_plan_id" {
+  description = "Resource ID of the DDoS Network Protection plan, when enabled."
+  value       = one(azurerm_network_ddos_protection_plan.this[*].id)
 }

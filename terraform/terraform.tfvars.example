@@ -5,6 +5,10 @@ environment    = "prod"
 location       = "westeurope"
 location_short = "weu"
 
+# Only needed for local runs against a non-default subscription. CI supplies
+# ARM_SUBSCRIPTION_ID instead.
+# subscription_id = "00000000-0000-0000-0000-000000000000"
+
 tags = {
   workload    = "landing-zone"
   managed_by  = "terraform"
@@ -12,12 +16,25 @@ tags = {
   owner       = "platform-team@contoso.com"
 }
 
+# --- Management groups --------------------------------------------------------
+# Requires Owner / Management Group Contributor on the Tenant Root Group.
+# enable_management_groups                        = true
+# management_group_display_name                   = "Contoso"
+# management_group_placement_for_this_subscription = "connectivity"
+# management_group_subscription_placements = {
+#   "11111111-1111-1111-1111-111111111111" = "corp"
+#   "22222222-2222-2222-2222-222222222222" = "sandbox"
+# }
+
 # --- Networking -------------------------------------------------------------
 hub_address_space   = ["10.0.0.0/16"]
 spoke_address_space = ["10.1.0.0/16"]
 
 firewall_sku_tier = "Premium" # Premium adds TLS inspection + IDPS
 vpn_gateway_sku   = "VpnGw1AZ"
+
+# Flat ~USD 3k/month per tenant — enable once, not per landing zone.
+# enable_ddos_protection = true
 
 # Point-to-site VPN (optional; leave empty to disable)
 vpn_client_address_space = ["172.16.0.0/24"]
@@ -32,20 +49,52 @@ vpn_client_address_space = ["172.16.0.0/24"]
 # Pre-shared keys: never in tfvars. Supply at run time, e.g.:
 #   export TF_VAR_onprem_shared_keys='{"headoffice":"<key>"}'
 
+# --- Flow logs ---------------------------------------------------------------
+# Needs a Network Watcher in the region; adds storage + ingestion cost.
+# enable_flow_logs        = true
+# flow_log_retention_days = 30
+
 # --- Management & security ---------------------------------------------------
 log_retention_days     = 90
+log_daily_quota_gb     = -1 # cap this in non-prod, e.g. 5
 security_contact_email = "security@contoso.com"
-allowed_locations      = ["westeurope", "northeurope"]
+platform_alert_emails  = ["platform-oncall@contoso.com"]
+# platform_alert_webhooks = ["https://contoso.webhook.office.com/..."]
+enable_resource_locks = true
+
+# --- Policy ------------------------------------------------------------------
+allowed_locations = ["westeurope", "northeurope"]
+
+# Start at Audit, switch to Deny once existing workloads comply.
+storage_public_access_effect = "Audit"
+deny_public_ip_on_nic        = true
+deploy_azure_monitor_agent   = true
+
+# denied_resource_types = [
+#   "Microsoft.ClassicCompute/virtualMachines",
+#   "Microsoft.ClassicNetwork/virtualNetworks",
+# ]
+
+# --- Cost management ---------------------------------------------------------
+# monthly_budget_amount = 4000
+# budget_start_date     = "2026-08-01T00:00:00Z"
+# budget_end_date       = "2030-08-01T00:00:00Z"
 
 # --- RBAC ---------------------------------------------------------------------
+enable_custom_roles = true
+
 # rbac_assignments = {
 #   platform_engineers = {
-#     principal_id         = "00000000-0000-0000-0000-000000000000" # AAD group
+#     principal_id         = "00000000-0000-0000-0000-000000000000" # Entra group
 #     role_definition_name = "Contributor"
 #   }
-#   security_readers = {
+#   network_ops = {
 #     principal_id         = "11111111-1111-1111-1111-111111111111"
-#     role_definition_name = "Security Reader"
+#     role_definition_name = "Network Management (NetOps)" # custom role
+#   }
+#   security_ops = {
+#     principal_id         = "22222222-2222-2222-2222-222222222222"
+#     role_definition_name = "Security Operations (SecOps)" # custom role
 #   }
 # }
 

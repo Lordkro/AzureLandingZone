@@ -1,0 +1,26 @@
+# Normalise to LF in the repository and in working copies. Without this, a
+# Windows checkout with core.autocrlf=true rewrites every file to CRLF, which
+# fights the .editorconfig and shows the whole tree as modified.
+* text=auto eol=lf
+
+# Terraform and Bicep are read by Linux CI runners; CRLF breaks heredocs and
+# shell fragments embedded in workflow files.
+*.tf      text eol=lf
+*.tfvars  text eol=lf
+*.hcl     text eol=lf
+*.bicep   text eol=lf
+*.bicepparam text eol=lf
+*.yml     text eol=lf
+*.yaml    text eol=lf
+*.sh      text eol=lf
+*.md      text eol=lf
+*.json    text eol=lf
+
+# Binary — never touch.
+*.png binary
+*.jpg binary
+*.zip binary
+*.pfx binary
+
+# Generated: keep the lock file out of diff noise in reviews but still versioned.
+.terraform.lock.hcl linguist-generated=true

@@ -42,6 +42,12 @@ variable "firewall_private_ip" {
   type = string
 }
 
+variable "ddos_protection_plan_id" {
+  description = "DDoS Network Protection plan to attach. Null leaves the VNet on the free Basic tier."
+  type        = string
+  default     = null
+}
+
 variable "use_remote_gateways" {
   description = "Route on-prem traffic through the hub VPN gateway."
   type        = bool

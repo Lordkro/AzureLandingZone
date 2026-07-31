@@ -1,5 +1,23 @@
 # Architecture
 
+## Management group hierarchy
+
+```mermaid
+graph TB
+    TRG["Tenant Root Group"] --> IR["mg-&lt;prefix&gt;"]
+    IR --> PLAT["Platform"]
+    IR --> LZ["Landing Zones"]
+    IR --> SBX["Sandbox"]
+    IR --> DEC["Decommissioned"]
+    PLAT --> ID["Identity"]
+    PLAT --> MGMT["Management"]
+    PLAT --> CONN["Connectivity"]
+    LZ --> CORP["Corp"]
+    LZ --> ONL["Online"]
+```
+
+Opt-in (`enable_management_groups`); see [governance.md](governance.md#management-groups) for why and how policy scope migrates.
+
 ## Topology
 
 ```mermaid
@@ -28,6 +46,8 @@ graph TB
     subgraph MGMT["Management (rg-mgmt)"]
         LAW["Log Analytics + DCR"]
         MC["Update Manager<br/>maintenance config"]
+        AG["Action group + alert rules"]
+        FLS["Flow log storage"]
     end
 
     subgraph SEC["Security (rg-sec)"]
@@ -39,6 +59,8 @@ graph TB
     AFW --> Internet
     PEP -.-> KV
     HUB & SPOKE -.-> LAW
+    SUB["Subscription activity log"] -.-> LAW
+    LAW --> AG
 ```
 
 ## Design decisions
@@ -49,15 +71,36 @@ Classic hub-spoke gives full control over routing and firewall policy at a lower
 ### Forced tunnelling
 The spoke's workload and private-endpoint subnets carry a route table sending `0.0.0.0/0` to the firewall's private IP with BGP propagation disabled. All egress is inspected; the firewall's DNS proxy is authoritative for spoke name resolution, which private DNS zone resolution requires when queries originate on-premises.
 
+The `nic-no-public-ip` policy assignment (Deny) exists to protect this invariant — a public IP on a NIC creates a return path that skips the route table entirely, so the firewall never sees the traffic.
+
 ### Zone redundancy
-Firewall, VPN Gateway public IP, and Application Gateway are pinned to zones 1–3. Storage defaults to ZRS. Confirm the target region supports availability zones (not all do); set `zones = []` / `zones: []` for regions without them.
+Firewall, VPN Gateway, Bastion and Application Gateway public IPs are pinned to zones 1–3. Storage defaults to ZRS. Confirm the target region supports availability zones (not all do); set `zones = []` / `zones: []` for regions without them.
 
 ### Identity-first data plane
 - Key Vault: RBAC authorization (no access policies), public network access disabled.
 - Storage: shared-key auth **disabled**, OAuth default, public access disabled. Data-plane access is via Entra ID roles (e.g. `Storage Blob Data Contributor`) over the private endpoint.
+- **Exception**: the flow log storage account keeps shared-key access enabled, because the Network Watcher flow log writer authenticates with the account key. It is a separate account so this exception does not leak into workload storage.
 
 ### Peering & gateway transit
 The hub peering advertises the VPN gateway (`allow_gateway_transit`); the spoke consumes it (`use_remote_gateways`), so on-premises networks reach spoke workloads through the hub. Spoke deployment therefore depends on the gateway existing first.
+
+### Private DNS zone set
+Beyond the usual PaaS zones, the default list includes the complete **Azure Monitor private link set**:
+
+```
+privatelink.monitor.azure.com
+privatelink.oms.opinsights.azure.com
+privatelink.ods.opinsights.azure.com
+privatelink.agentsvc.azure-automation.net
+privatelink.blob.core.windows.net
+```
+
+All five must be present together. A partial set is worse than none: Azure Monitor Agent resolves some endpoints privately and others publicly, and ingestion fails in ways that produce no obvious error. The blob zone is shared with storage private endpoints, which is why it appears once in the list.
+
+Creating the zones does not by itself force Monitor traffic private — that needs an Azure Monitor Private Link Scope (AMPLS) linked to the workspace and hub VNet. The zones are the prerequisite; add AMPLS when you are ready to close the last public egress path for telemetry.
+
+### Observability is part of the platform, not an add-on
+Diagnostic settings on individual resources only cover the data plane. The **subscription activity log** diagnostic setting is what captures who changed what, and the AMA install + DCR association policies are what make the data collection rule actually collect from VMs. All three are deployed by default; see [governance.md](governance.md#monitoring-alerting--diagnostics).
 
 ## IP address plan
 
@@ -77,10 +120,15 @@ The hub peering advertises the VPN gateway (`allow_gateway_transit`); the spoke 
 
 ## Adding a spoke
 
+The root modules deploy **one** spoke deliberately: a second workload landing zone normally belongs in its own subscription with its own state, not bolted into the platform's. To add one:
+
 1. Reserve the next /16 (or right-sized block) from the plan above.
 2. Terraform: instantiate `modules/spoke-network` again with the new range; Bicep: add another `spokeNetwork` + two `vnetPeering` module blocks.
 3. Add the spoke's range to `spoke_address_space`-driven firewall rules if it needs the platform egress allowances.
-4. Link the new VNet to the private DNS zones.
+4. Link the new VNet to the private DNS zones (`module.private_dns.virtual_network_ids`).
+5. Add it to `virtual_network_ids` in the flow-logs module if flow logs are enabled.
+
+For a genuinely multi-subscription estate, enable the management group hierarchy and run this stack once per platform subscription, with workload landing zones deploying only the spoke module against the shared hub.
 
 ## Cost considerations
 
@@ -93,6 +141,10 @@ Always-on platform components dominate the bill (rough, region-dependent):
 | VPN Gateway VpnGw1AZ | Fixed hourly |
 | Bastion Standard | Fixed hourly + scale units |
 | Defender for Cloud | Per-resource per plan |
-| Log Analytics | Per-GB ingestion — set `daily_quota_gb` in non-prod |
+| Log Analytics | Per-GB ingestion — set `log_daily_quota_gb` in non-prod |
+| DDoS Network Protection | ~USD 3k/mo flat, **per tenant** — share one plan, do not create one per landing zone |
+| Traffic Analytics | Per-GB on top of flow log storage |
 
-For dev/test: `firewall_sku_tier = "Standard"`, drop `Bastion` to Basic (or deploy on demand), disable the App Gateway module, and cap workspace ingestion.
+For dev/test: `firewall_sku_tier = "Standard"`, drop Bastion to Basic (or deploy on demand), disable the App Gateway module, cap workspace ingestion, and leave `enable_ddos_protection` and `enable_flow_logs` off.
+
+Set `monthly_budget_amount` so the forecast alert warns you before month-end rather than after.

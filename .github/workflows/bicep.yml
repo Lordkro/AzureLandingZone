@@ -11,20 +11,79 @@ on:
     paths:
       - "bicep/**"
       - ".github/workflows/bicep.yml"
+  schedule:
+    # Nightly what-if — surfaces out-of-band portal changes.
+    - cron: "0 3 * * *"
+  workflow_dispatch:
 
 permissions:
   id-token: write # OIDC federated login to Azure
   contents: read
   pull-requests: write
+  security-events: write # upload Checkov SARIF
+
+# Serialise deployments: two concurrent subscription deployments touching the
+# same resource names race each other.
+concurrency:
+  group: bicep-${{ github.ref }}
+  cancel-in-progress: false
 
 env:
   LOCATION: westeurope
   DEPLOYMENT_NAME: alz-${{ github.run_number }}
 
 jobs:
-  validate:
-    name: Lint, Validate & What-If
+  lint:
+    name: Lint & Scan
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Compile every template, not just main.bicep — managementGroups.bicep is
+      # a separate root and would otherwise never be checked.
+      - name: Bicep build (fail on warnings)
+        run: |
+          set -euo pipefail
+          status=0
+          for template in bicep/main.bicep bicep/managementGroups.bicep; do
+            echo "::group::$template"
+            if ! az bicep build --file "$template" --stdout > /dev/null 2> "diag.txt"; then
+              status=1
+            fi
+            # The linter writes Info/Warning/Error diagnostics to stderr and only
+            # exits non-zero on Error, so escalate warnings explicitly.
+            if grep -E " : (Warning|Error) " diag.txt; then
+              status=1
+            fi
+            cat diag.txt
+            echo "::endgroup::"
+          done
+          exit $status
+
+      - name: Validate parameter file
+        run: az bicep build-params --file bicep/main.bicepparam --stdout > /dev/null
+
+      - name: Checkov
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: bicep
+          framework: bicep
+          quiet: true
+          soft_fail: true
+          output_format: cli,sarif
+          output_file_path: console,checkov.sarif
+
+      - name: Upload Checkov SARIF
+        if: always() && hashFiles('checkov.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: checkov.sarif
+          category: checkov-bicep
+
+  validate:
+    name: Validate & What-If
+    runs-on: ubuntu-latest
+    needs: lint
     steps:
       - uses: actions/checkout@v4
 
@@ -34,9 +93,6 @@ jobs:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-
-      - name: Bicep lint
-        run: az bicep build --file bicep/main.bicep --stdout > /dev/null
 
       - name: Validate deployment
         run: |
@@ -54,29 +110,33 @@ jobs:
             --location "$LOCATION" \
             --template-file bicep/main.bicep \
             --parameters bicep/main.bicepparam \
-            --result-format FullResourcePayloads > whatif.txt
+            --result-format ResourceIdOnly > whatif.txt
           cat whatif.txt
 
+      # whatif.txt is read from disk, never interpolated into the script body —
+      # its contents can include backticks and ${} sequences.
       - name: Comment what-if on PR
         if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
-            const whatif = fs.readFileSync('whatif.txt', 'utf8');
-            const body = `#### Bicep What-If
-            <details><summary>Show changes</summary>
-
-            \`\`\`
-            ${whatif}
-            \`\`\`
-
-            </details>`;
-            github.rest.issues.createComment({
+            const whatif = fs.readFileSync('whatif.txt', 'utf8').slice(0, 60000);
+            const body = [
+              '#### Bicep What-If',
+              '<details><summary>Show changes</summary>',
+              '',
+              '```',
+              whatif,
+              '```',
+              '',
+              '</details>',
+            ].join('\n');
+            await github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: body.substring(0, 65000)
+              body,
             });
 
   deploy:

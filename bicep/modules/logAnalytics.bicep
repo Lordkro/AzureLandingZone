@@ -2,6 +2,10 @@
 param name string
 param location string
 param retentionInDays int = 90
+
+@description('Daily ingestion cap in GB. -1 = unlimited; cap it in non-prod.')
+param dailyQuotaGb int = -1
+
 param tags object = {}
 
 resource workspace 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
@@ -13,6 +17,9 @@ resource workspace 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
       name: 'PerGB2018'
     }
     retentionInDays: retentionInDays
+    workspaceCapping: {
+      dailyQuotaGb: dailyQuotaGb
+    }
     features: {
       enableLogAccessUsingOnlyResourcePermissions: true
     }
@@ -99,5 +106,6 @@ resource vmDataCollectionRule 'Microsoft.Insights/dataCollectionRules@2023-03-11
 }
 
 output workspaceId string = workspace.id
+output workspaceName string = workspace.name
 output workspaceCustomerId string = workspace.properties.customerId
 output vmDataCollectionRuleId string = vmDataCollectionRule.id

@@ -1,0 +1,20 @@
+# Every change to the landing zone needs a platform reviewer.
+# Replace the placeholder teams with real ones before enabling branch protection.
+
+*                       @platform-team
+
+# Governance changes (policy effects, custom roles, RBAC, management groups) have
+# tenant-wide reach — require security review as well.
+/terraform/modules/policy/         @platform-team @security-team
+/terraform/modules/rbac/           @platform-team @security-team
+/terraform/modules/custom-roles/   @platform-team @security-team
+/terraform/modules/management-groups/ @platform-team @security-team
+/terraform/modules/defender/       @platform-team @security-team
+/bicep/modules/policy.bicep        @platform-team @security-team
+/bicep/modules/rbac.bicep          @platform-team @security-team
+/bicep/modules/customRoles.bicep   @platform-team @security-team
+/bicep/managementGroups.bicep      @platform-team @security-team
+/bicep/modules/defender.bicep      @platform-team @security-team
+
+# The pipelines hold the deployment identity.
+/.github/workflows/     @platform-team @security-team
