@@ -83,7 +83,7 @@ jobs:
         working-directory: ${{ env.WORKING_DIR }}
         run: terraform fmt -check -recursive
 
-      - uses: terraform-linters/setup-tflint@v4
+      - uses: terraform-linters/setup-tflint@v6
         with:
           tflint_version: latest
 
