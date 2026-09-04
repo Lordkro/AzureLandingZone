@@ -66,7 +66,7 @@ jobs:
     name: Lint & Scan
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Compile every template, not just main.bicep — managementGroups.bicep is
       # a separate root and would otherwise never be checked.
@@ -115,7 +115,7 @@ jobs:
     needs: [preflight, lint]
     if: needs.preflight.outputs.azure_configured == 'true'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Azure login (OIDC)
         uses: azure/login@v3
@@ -176,7 +176,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: production # requires manual approval when configured
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Azure login (OIDC)
         uses: azure/login@v3
